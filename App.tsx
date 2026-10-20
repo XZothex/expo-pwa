@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { addDoc, collection, deleteDoc, doc, onSnapshot, serverTimestamp, updateDoc } from 'firebase/firestore';
-import { db, firebaseConfigured } from './src/firebase';
+import { addDoc, collection, deleteDoc, doc, onSnapshot, query, where, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { onAuthStateChanged, signInAnonymously, type User } from 'firebase/auth';
+import { auth, db, firebaseConfigured } from './src/firebase';
 
 type Registro = { id: string; nome: string; descricao: string };
 const collectionName = 'registros';
@@ -16,6 +17,8 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(Boolean(auth));
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
@@ -26,22 +29,48 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!db) return;
-    setLoading(true);
-    const unsubscribe = onSnapshot(collection(db, collectionName), snapshot => {
-      setItems(snapshot.docs.map(item => ({ id: item.id, nome: String(item.data().nome ?? ''), descricao: String(item.data().descricao ?? '') })));
-      setLoading(false);
-    }, error => { setMessage('Erro ao consultar Firestore: ' + error.message); setLoading(false); });
+    if (!auth) return;
+    const unsubscribe = onAuthStateChanged(auth, currentUser => {
+      if (currentUser) {
+        setUser(currentUser);
+        setAuthLoading(false);
+      } else {
+        setUser(null);
+        setAuthLoading(true);
+        void signInAnonymously(auth).catch(error => {
+          setMessage('Falha na autenticação: ' + error.message);
+          setAuthLoading(false);
+        });
+      }
+    }, error => {
+      setMessage('Erro de autenticação: ' + error.message);
+      setAuthLoading(false);
+    });
     return unsubscribe;
   }, []);
 
+  useEffect(() => {
+    if (!db || !user) { setItems([]); return; }
+    setLoading(true);
+    const unsubscribe = onSnapshot(
+      query(collection(db, collectionName), where('ownerUid', '==', user.uid)),
+      snapshot => {
+        setItems(snapshot.docs.map(item => ({ id: item.id, nome: String(item.data().nome ?? ''), descricao: String(item.data().descricao ?? '') })));
+        setLoading(false);
+      },
+      error => { setMessage('Erro ao consultar Firestore: ' + error.message); setLoading(false); }
+    );
+    return unsubscribe;
+  }, [user]);
+
   const save = async () => {
     if (!nome.trim() || !descricao.trim()) { setMessage('Preencha Nome e Descrição.'); return; }
-    if (!db) { setMessage('Configure o Firebase no arquivo .env para salvar registros.'); return; }
+    if (!db || !user) { setMessage('Aguarde a autenticação do Firebase para salvar.'); return; }
+    if (nome.trim().length > 120 || descricao.trim().length > 2000) { setMessage('Limite: 120 caracteres no nome e 2000 na descrição.'); return; }
     setBusy(true); setMessage('');
     try {
       if (editing) await updateDoc(doc(db, collectionName, editing), { nome: nome.trim(), descricao: descricao.trim() });
-      else await addDoc(collection(db, collectionName), { nome: nome.trim(), descricao: descricao.trim(), criadoEm: serverTimestamp() });
+      else await addDoc(collection(db, collectionName), { nome: nome.trim(), descricao: descricao.trim(), criadoEm: serverTimestamp(), ownerUid: user.uid });
       setNome(''); setDescricao(''); setEditing(null); setMessage('Registro salvo com sucesso!'); setScreen('list');
     } catch (error) { setMessage('Falha ao salvar: ' + (error instanceof Error ? error.message : String(error))); }
     finally { setBusy(false); }
@@ -49,7 +78,7 @@ export default function App() {
   const edit = (item: Registro) => { setNome(item.nome); setDescricao(item.descricao); setEditing(item.id); setMessage(''); setScreen('form'); };
   const remove = (item: Registro) => {
     const execute = async () => {
-      if (!db) return;
+      if (!db || !user) return;
       setBusy(true);
       try { await deleteDoc(doc(db, collectionName, item.id)); setMessage('Registro excluído.'); }
       catch (error) { setMessage('Falha ao excluir: ' + (error instanceof Error ? error.message : String(error))); }
@@ -66,6 +95,7 @@ export default function App() {
       <Text style={styles.title}>Expo PWA + Firebase</Text>
       <Text style={styles.subtitle}>CRUD de registros · {screen === 'form' ? 'Formulário' : 'Listagem'}</Text>
       {!firebaseConfigured && <Text style={styles.warning}>Firebase ainda não configurado. Preencha as variáveis EXPO_PUBLIC_FIREBASE_* para ativar o CRUD.</Text>}
+      {authLoading && <Text style={styles.subtitle}>Autenticando no Firebase...</Text>}
       <View style={styles.nav}><Button label="Formulário" secondary={screen !== 'form'} onPress={() => setScreen('form')} /><Button label="Listagem" secondary={screen !== 'list'} onPress={() => setScreen('list')} /></View>
       {screen === 'form' ? <>
         <Text style={styles.heading}>{editing ? 'Editar registro' : 'Novo registro'}</Text>
@@ -73,7 +103,7 @@ export default function App() {
         <TextInput accessibilityLabel="Nome" placeholder="Digite o nome" style={styles.input} value={nome} onChangeText={setNome} />
         <Text style={styles.label}>Descrição</Text>
         <TextInput accessibilityLabel="Descrição" placeholder="Digite a descrição" style={[styles.input, styles.multiline]} multiline value={descricao} onChangeText={setDescricao} />
-        <Button label={busy ? 'Salvando...' : editing ? 'Atualizar' : 'Salvar'} disabled={busy || !db} onPress={() => void save()} />
+        <Button label={busy ? 'Salvando...' : editing ? 'Atualizar' : 'Salvar'} disabled={busy || !db || !user || authLoading} onPress={() => void save()} />
         {editing && <Button label="Cancelar edição" secondary onPress={() => { setEditing(null); setNome(''); setDescricao(''); }} />}
       </> : <>
         <Text style={styles.heading}>Registros ({items.length})</Text>
