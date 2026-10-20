@@ -7,7 +7,7 @@
     "userInterfaceStyle": "automatic",
     "web": {
       "bundler": "metro",
-      "output": "static",
+      "output": "single",
       "name": "Expo PWA Firebase CRUD",
       "shortName": "Expo CRUD",
       "themeColor": "#2563eb",
