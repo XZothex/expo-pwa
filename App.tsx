@@ -25,7 +25,7 @@ export default function App() {
     let manifest = document.querySelector('link[rel="manifest"]');
     if (!manifest) { manifest = document.createElement('link'); manifest.setAttribute('rel', 'manifest'); document.head.appendChild(manifest); }
     manifest.setAttribute('href', '/manifest.webmanifest');
-    if ('serviceWorker' in navigator) window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js').catch(console.warn); }, { once: true });
+    if ('serviceWorker' in navigator) { const register = () => { navigator.serviceWorker.register('/sw.js').catch(console.warn); }; if (document.readyState === 'complete') register(); else window.addEventListener('load', register, { once: true }); }
   }, []);
 
   useEffect(() => {
