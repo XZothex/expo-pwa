@@ -1,0 +1,17 @@
+{
+  "expo": {
+    "name": "Expo PWA Firebase CRUD",
+    "slug": "expo-pwa",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "name": "Expo PWA Firebase CRUD",
+      "shortName": "Expo CRUD",
+      "themeColor": "#2563eb",
+      "backgroundColor": "#ffffff"
+    }
+  }
+}
